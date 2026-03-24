@@ -1,0 +1,47 @@
+{
+  "name": "video-sync-service",
+  "version": "1.0.0",
+  "description": "Production-ready video sync service: S3 → Vimeo, Gumlet, Cloudflare Stream",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "db:migrate": "bunx prisma migrate dev",
+    "db:migrate:prod": "bunx prisma migrate deploy",
+    "db:studio": "bunx prisma studio",
+    "db:generate": "bunx prisma generate",
+    "db:push": "bunx prisma db push",
+    "db:seed": "bun run prisma/seed.ts",
+    "type-check": "bunx tsc --noEmit",
+    "lint": "bunx eslint src --ext .ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/lib-storage": "^3.600.0",
+    "@aws-sdk/s3-request-presigner": "^3.600.0",
+    "@prisma/client": "^5.16.0",
+    "bcryptjs": "^3.0.3",
+    "bullmq": "^5.12.0",
+    "hono": "^4.5.0",
+    "ioredis": "^5.4.1",
+    "jose": "^6.2.2",
+    "pino": "^9.3.2",
+    "pino-pretty": "^11.2.1",
+    "tus-js-client": "^4.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/bun": "latest",
+    "@types/node": "^20.14.0",
+    "prisma": "^5.16.0",
+    "typescript": "^5.5.0"
+  },
+  "trustedDependencies": [
+    "@prisma/client",
+    "prisma"
+  ]
+}

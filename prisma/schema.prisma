@@ -1,0 +1,301 @@
+// Prisma Schema — Video Sync Service
+// Run: bunx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────
+
+enum SyncStatus {
+  PENDING
+  DOWNLOADING
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  CANCELLED
+}
+
+enum Platform {
+  VIMEO
+  GUMLET
+  CLOUDFLARE
+}
+
+enum ProviderType {
+  S3
+  VIMEO
+  GUMLET
+  CLOUDFLARE
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+// ─── Provider ────────────────────────────────────────────────
+
+model Provider {
+  id           String       @id @default(cuid())
+  name         String
+  type         ProviderType
+  credentials  String       // AES-256-GCM encrypted JSON
+  isActive     Boolean      @default(true)
+  lastSyncedAt DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  videos       ProviderVideo[]
+  syncJobsAsSource SyncJob[]   @relation("SourceProvider")
+  syncResults  SyncJobResult[]
+  importJobs   ImportJob[]
+
+  @@index([type])
+  @@index([isActive])
+}
+
+// ─── ProviderVideo ────────────────────────────────────────────
+
+model ProviderVideo {
+  id           String    @id @default(cuid())
+  providerId   String
+  externalId   String    // Platform's own video ID
+  title        String?
+  description  String?
+  duration     Float?
+  size         BigInt?
+  status       String?
+  thumbnailUrl String?
+  streamUrl    String?
+  embedUrl     String?
+  metadata     Json      // Complete raw API response
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  provider     Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, externalId])
+  @@index([providerId])
+  @@index([externalId])
+  @@index([status])
+}
+
+// ─── SyncJob ─────────────────────────────────────────────────
+
+model SyncJob {
+  id           String      @id @default(cuid())
+  status       SyncStatus  @default(PENDING)
+
+  // Provider-based source (new system)
+  sourceProviderId      String?
+  destinationProviderIds String[]   @default([])
+  sourceVideoId         String?    // ProviderVideo.id if syncing one video
+
+  // Legacy S3 source fields
+  sourceKey    String?                   // S3 object key
+  sourceBucket String?                   // S3 bucket name
+  sourceEtag   String?                   // S3 ETag for deduplication
+  sourceSize   BigInt?                   // File size in bytes
+  sourceMime   String?                   // MIME type (video/mp4, etc.)
+
+  // Video metadata
+  title        String?
+  description  String?
+  tags         String[]    @default([])
+
+  // Legacy destinations (platform enum)
+  destinations Platform[]  @default([])
+
+  // BullMQ job references
+  bullJobId    String?                   // BullMQ job ID
+
+  // Retry tracking
+  attempts     Int         @default(0)
+  maxAttempts  Int         @default(3)
+  lastError    String?
+
+  // Timestamps
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  // Relations
+  results      PlatformResult[]
+  syncResults  SyncJobResult[]
+  webhooks     WebhookEvent[]
+  sourceProvider Provider? @relation("SourceProvider", fields: [sourceProviderId], references: [id])
+
+  @@index([status])
+  @@index([sourceEtag])
+  @@index([createdAt])
+  @@index([sourceProviderId])
+}
+
+// ─── PlatformResult ──────────────────────────────────────────
+
+model PlatformResult {
+  id          String     @id @default(cuid())
+  jobId       String
+  platform    Platform
+
+  status      SyncStatus @default(PENDING)
+
+  // Platform-specific IDs
+  platformId  String?    // Vimeo video ID / Gumlet asset ID / Cloudflare video ID
+
+  // Output URLs
+  embedUrl    String?    // Vimeo embed URL
+  playerUrl   String?    // Direct player URL
+  hlsUrl      String?    // HLS stream URL
+  dashUrl     String?    // DASH stream URL
+  thumbnailUrl String?   // Thumbnail image URL
+  downloadUrl String?    // Download URL (if available)
+
+  // Metadata returned by platform
+  platformMeta Json?     // Raw platform response metadata
+
+  // Error info
+  error       String?
+  attempts    Int        @default(0)
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  job         SyncJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, platform])
+  @@index([jobId])
+  @@index([platform])
+  @@index([platformId])
+}
+
+// ─── SyncJobResult ───────────────────────────────────────────
+
+model SyncJobResult {
+  id          String     @id @default(cuid())
+  jobId       String
+  providerId  String
+  status      SyncStatus @default(PENDING)
+  externalId  String?    // Platform's video ID after upload
+  urls        Json?      // { embedUrl, hlsUrl, dashUrl, thumbnailUrl, playerUrl }
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  job         SyncJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  provider    Provider   @relation(fields: [providerId], references: [id])
+
+  @@unique([jobId, providerId])
+  @@index([jobId])
+  @@index([providerId])
+  @@index([status])
+}
+
+// ─── UserRole ─────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+// ─── User ─────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         UserRole  @default(VIEWER)
+  apiKey       String?   @unique
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  auditLogs    AuditLog[]
+
+  @@index([email])
+  @@index([apiKey])
+  @@index([role])
+}
+
+// ─── AuditLog ─────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   // e.g. "provider.create", "sync.start", "video.delete"
+  resource  String?  // e.g. "provider:abc123"
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ─── ImportJob ────────────────────────────────────────────────
+
+model ImportJob {
+  id          String     @id @default(cuid())
+  providerId  String
+  status      SyncStatus
+  totalVideos Int        @default(0)
+  imported    Int        @default(0)
+  failed      Int        @default(0)
+  skipped     Int        @default(0)
+  error       String?
+  startedAt   DateTime   @default(now())
+  completedAt DateTime?
+
+  provider    Provider   @relation(fields: [providerId], references: [id])
+
+  @@index([providerId])
+  @@index([status])
+}
+
+// ─── WebhookEvent ─────────────────────────────────────────────
+
+model WebhookEvent {
+  id          String             @id @default(cuid())
+  platform    Platform
+  eventType   String             // e.g. "video.available", "transcode.complete"
+  status      WebhookEventStatus @default(RECEIVED)
+
+  // Associated job (may be null if we can't match)
+  jobId       String?
+  platformId  String?            // Platform video ID in the event
+
+  // Raw payload
+  payload     Json
+
+  // Processing info
+  processedAt DateTime?
+  error       String?
+
+  receivedAt  DateTime   @default(now())
+
+  job         SyncJob?   @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([platform])
+  @@index([jobId])
+  @@index([platformId])
+  @@index([receivedAt])
+}
