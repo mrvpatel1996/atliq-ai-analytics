@@ -19,6 +19,8 @@ import { syncRouter } from "./sync.js";
 import { webhooksRouter } from "./webhooks.js";
 import { authRouter, usersRouter } from "./auth.js";
 import { importRouter } from "./import.js";
+import { foldersRouter } from "./folders.js";
+import { videoGroupsRouter } from "./video-groups.js";
 
 const log = createLogger("api:routes");
 
@@ -135,6 +137,8 @@ export function createApp(): Hono {
   app.route("/api/videos", videosRouter);
   app.route("/api/sync", syncRouter);
   app.route("/api/webhooks", webhooksRouter);
+  app.route("/api/folders", foldersRouter);
+  app.route("/api/video-groups", videoGroupsRouter);
 
   // ── 404 ────────────────────────────────────────────────────
   app.notFound((c) => c.json({ success: false, error: "Not found" }, 404));

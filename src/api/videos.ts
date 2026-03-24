@@ -29,7 +29,11 @@ videosRouter.get("/", async (c) => {
   const [videos, total] = await Promise.all([
     prisma.providerVideo.findMany({
       where,
-      include: { provider: { select: { id: true, name: true, type: true } } },
+      include: {
+        provider: { select: { id: true, name: true, type: true } },
+        folderMappings: { select: { folderId: true } },
+        groupMemberships: { select: { groupId: true } },
+      },
       orderBy: { updatedAt: "desc" },
       skip: (page - 1) * limit,
       take: limit,
@@ -37,9 +41,15 @@ videosRouter.get("/", async (c) => {
     prisma.providerVideo.count({ where }),
   ]);
 
+  const data = videos.map(({ folderMappings, groupMemberships, ...v }) => ({
+    ...v,
+    folderIds: folderMappings.map((f) => f.folderId),
+    groupId: groupMemberships[0]?.groupId ?? null,
+  }));
+
   return c.json({
     success: true,
-    data: videos,
+    data,
     pagination: { page, limit, total, pages: Math.ceil(total / limit) },
   });
 });
@@ -51,10 +61,16 @@ videosRouter.get("/:id", async (c) => {
 
   const video = await prisma.providerVideo.findUnique({
     where: { id },
-    include: { provider: { select: { id: true, name: true, type: true } } },
+    include: {
+      provider: { select: { id: true, name: true, type: true } },
+      folderMappings: { select: { folderId: true } },
+      groupMemberships: { select: { groupId: true } },
+    },
   });
 
   if (!video) return c.json({ success: false, error: "Video not found" }, 404);
+
+  const { folderMappings, groupMemberships, ...videoData } = video;
 
   // Find all copies of this video (same title, across providers) — best effort match
   const copies = await prisma.providerVideo.findMany({
@@ -62,5 +78,13 @@ videosRouter.get("/:id", async (c) => {
     include: { provider: { select: { id: true, name: true, type: true } } },
   });
 
-  return c.json({ success: true, data: { ...video, copies } });
+  return c.json({
+    success: true,
+    data: {
+      ...videoData,
+      folderIds: folderMappings.map((f) => f.folderId),
+      groupId: groupMemberships[0]?.groupId ?? null,
+      copies,
+    },
+  });
 });

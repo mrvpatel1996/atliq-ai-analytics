@@ -81,7 +81,9 @@ model ProviderVideo {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  provider     Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  provider         Provider           @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  folderMappings   FolderVideo[]
+  groupMemberships VideoGroupMember[]
 
   @@unique([providerId, externalId])
   @@index([providerId])
@@ -268,6 +270,109 @@ model ImportJob {
   provider    Provider   @relation(fields: [providerId], references: [id])
 
   @@index([providerId])
+  @@index([status])
+}
+
+// ─── Folder ───────────────────────────────────────────────────
+
+model Folder {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  parentId    String?
+  path        String    // full path e.g. "/Marketing/Q1/Ads"
+  depth       Int       @default(0)
+  color       String?   // hex color for UI
+  icon        String?   // emoji or icon name
+  isPrivate   Boolean   @default(false)
+  createdBy   String?   // userId
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  parent        Folder?       @relation("FolderTree", fields: [parentId], references: [id])
+  children      Folder[]      @relation("FolderTree")
+  videoMappings FolderVideo[]
+
+  @@index([parentId])
+  @@index([path])
+}
+
+model FolderVideo {
+  id              String        @id @default(cuid())
+  folderId        String
+  providerVideoId String        // references ProviderVideo.id
+  addedBy         String?       // userId
+  addedAt         DateTime      @default(now())
+  sortOrder       Int           @default(0)
+  notes           String?
+
+  folder        Folder        @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  providerVideo ProviderVideo @relation(fields: [providerVideoId], references: [id], onDelete: Cascade)
+
+  @@unique([folderId, providerVideoId])
+  @@index([folderId])
+  @@index([providerVideoId])
+}
+
+// ─── VideoGroup ───────────────────────────────────────────────
+
+enum MappingStatus {
+  ACTIVE
+  PENDING_SYNC
+  SYNC_FAILED
+  ARCHIVED
+}
+
+model VideoGroup {
+  id             String        @id @default(cuid())
+  name           String        // canonical title
+  description    String?
+  tags           String[]      // shared tags
+  thumbnailUrl   String?       // preferred thumbnail
+  duration       Int?          // seconds, from primary
+  primaryVideoId String?       // which ProviderVideo is the "source of truth"
+  status         MappingStatus @default(ACTIVE)
+  metadata       Json?         // any extra shared metadata
+  createdBy      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  videos      VideoGroupMember[]
+  syncHistory VideoGroupSync[]
+
+  @@index([status])
+}
+
+model VideoGroupMember {
+  id              String    @id @default(cuid())
+  groupId         String
+  providerVideoId String
+  isPrimary       Boolean   @default(false)  // source of truth for this group
+  addedAt         DateTime  @default(now())
+  notes           String?
+
+  group         VideoGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  providerVideo ProviderVideo @relation(fields: [providerVideoId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, providerVideoId])
+  @@index([groupId])
+  @@index([providerVideoId])
+}
+
+model VideoGroupSync {
+  id          String     @id @default(cuid())
+  groupId     String
+  action      String     // "sync_metadata", "sync_thumbnail", "full_sync"
+  status      SyncStatus
+  triggeredBy String?    // userId
+  details     Json?
+  startedAt   DateTime   @default(now())
+  completedAt DateTime?
+  error       String?
+
+  group VideoGroup @relation(fields: [groupId], references: [id])
+
+  @@index([groupId])
   @@index([status])
 }
 
